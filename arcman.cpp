@@ -1,5 +1,6 @@
 ﻿#include <iostream>
 #include "handler.hpp"
+#include <cstring>
 
 using HandlerFunc = void(*)(const char*, const char*);
 
