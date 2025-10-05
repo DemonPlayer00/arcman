@@ -89,7 +89,94 @@ namespace handler {
         exit(0);
     }
 
-	void unpack(const char* input, const char* output) {
+    void unpack(const char* input, const char* output) {
+        namespace fs = std::filesystem;
+        try {
+            fs::create_directories(output);
+        }
+        catch (const fs::filesystem_error& e) {
+            std::cerr << "E: Failed to create output directory: " << e.what() << std::endl;
+            exit(2);
+        }
 
-	}
+        std::ifstream inStream(input, std::ios::binary);
+        if (!inStream.is_open()) {
+            std::cerr << "E: Failed to open input file: " << input << std::endl;
+            exit(2);
+        }
+
+        char head[12];
+        inStream.read(head, sizeof(head));
+        ArcStruct tempArc;
+        if (memcmp(head, tempArc.head, sizeof(head)) != 0) {
+            std::cerr << "E: Invalid file format - incorrect header" << std::endl;
+            exit(3);
+        }
+
+        unsigned int count = 0;
+        inStream.read(reinterpret_cast<char*>(&count), sizeof(count));
+        if (count == 0) {
+            std::cout << "W: No files found in archive" << std::endl;
+            return;
+        }
+
+        std::vector<IndexStruct> file_list(count);
+        inStream.read(reinterpret_cast<char*>(file_list.data()),
+            sizeof(IndexStruct) * count);
+
+        std::streampos data_start = inStream.tellg();
+        if (data_start == std::streampos(-1)) {
+            std::cerr << "E: Failed to determine data position" << std::endl;
+            exit(4);
+        }
+
+        for (unsigned int i = 0; i < count; ++i) {
+            const IndexStruct& index = file_list[i];
+            std::cout << "\033[2K\rExtracting " << (i + 1) << "/" << count << ": " << index.name << std::flush;
+
+            if (index.name[0] == '\0') {
+                std::cerr << "\nW: Skipping file with empty name" << std::endl;
+                continue;
+            }
+
+            fs::path output_path = fs::path(output) / index.name;
+
+            if (index.size == 0) {
+                std::cerr << "\nW: Skipping empty file: " << index.name << std::endl;
+                continue;
+            }
+
+            inStream.seekg(data_start + static_cast<std::streamoff>(index.start));
+            if (!inStream) {
+                std::cerr << "\nE: Failed to seek to data for: " << index.name << std::endl;
+                continue;
+            }
+
+            char* buffer = new char[index.size];
+            inStream.read(buffer, index.size);
+
+            if (inStream.gcount() != static_cast<std::streamsize>(index.size)) {
+                std::cerr << "\nE: Incomplete data for: " << index.name << " (read "
+                    << inStream.gcount() << "/" << index.size << " bytes)" << std::endl;
+                delete[] buffer;
+                continue;
+            }
+
+            std::ofstream outStream(output_path, std::ios::binary);
+            if (outStream.is_open()) {
+                outStream.write(buffer, index.size);
+                outStream.close();
+            }
+            else {
+                std::cerr << "\nE: Failed to create output file: " << output_path << std::endl;
+            }
+
+            delete[] buffer;
+        }
+
+        std::cout << "\033[2K\rSuccessfully extracted " << count << " file"
+            << (count > 1 ? "s" : "") << std::endl;
+        inStream.close();
+        exit(0);
+    }
 }
